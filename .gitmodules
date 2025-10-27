@@ -1,0 +1,6 @@
+[submodule "Conveyor-Hardware-Design"]
+	path = Conveyor-Hardware-Design
+	url = https://github.com/EvilDoomSlayer/Conveyor-Hardware-Design
+[submodule "Conveyor-Electronic-Design"]
+	path = Conveyor-Electronic-Design
+	url = https://github.com/EvilDoomSlayer/Conveyor-Electronic-Design
