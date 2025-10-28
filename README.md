@@ -32,18 +32,46 @@ The workflow is as follows:
 
 ***
 
+## Repository Structure
+
+This project is organized into several repositories. This main repository contains the firmware, while the hardware designs and supplementary tools are included as Git submodules.
+
+* **`/` (root)**: Contains the main ESP32 firmware for the conveyor system.
+* **`Conveyor-Hardware-Design`**: Contains all mechanical design files.
+    * SolidWorks models
+    * STL files for 3D printing
+    * DWG files for manufacturing
+* **`Conveyor-Electronic-Design`**: Contains the electronic design files for the custom PCB.
+    * KiCad project (schematic and PCB layout)
+    * Gerber files for PCB fabrication
+* **`Conveyor-Tools`**: Includes PC-based software tools for:
+    * Sensor calibration
+    * System diagnostics
+    * Initial setup
+
+To clone this repository and all its submodules, use the `--recurse-submodules` flag:
+```sh
+git clone --recurse-submodules <your-repository-url>
+```
+If you have already cloned the repository, you can initialize the submodules with:
+```sh
+git submodule update --init --recursive
+```
+
+***
+
 ## Hardware Requirements
 
-| Component             | Description                                          |
-| --------------------- | ---------------------------------------------------- |
-| **Microcontroller** | ESP32-WROOM-32 or similar                            |
-| **Motor & Driver** | 1x DC Motor + L293D Motor Driver IC                  |
-| **Servos** | 2x SG90 or similar servo motors                      |
-| **Object Detection** | 1x E18-D80NK IR Proximity Sensor                     |
-| **Weighing** | 1x Load Cell + HX711 Amplifier Module                |
-| **Magnetic Detection**| 1x KY-024 Linear Magnetic Hall Sensor                |
-| **Status Indicator** | On-board LED or external LED                         |
-| **Power Supply** | 5V DC supply capable of powering the motors and ESP32 |
+| Component              | Description                                     |
+| ---------------------- | ----------------------------------------------- |
+| **Microcontroller** | ESP32-WROOM-32 or similar                       |
+| **Motor & Driver** | 1x DC Motor + L293D Motor Driver IC             |
+| **Servos** | 2x SG90 or similar servo motors                 |
+| **Object Detection** | 1x E18-D80NK IR Proximity Sensor                |
+| **Weighing** | 1x Load Cell + HX711 Amplifier Module           |
+| **Magnetic Detection** | 1x KY-024 Linear Magnetic Hall Sensor           |
+| **Status Indicator** | On-board LED or external LED                    |
+| **Power Supply** | 5V DC supply for motors and ESP32 |
 
 ***
 
@@ -117,10 +145,7 @@ Additionally, you may need to adjust the following constants based on your speci
 
 ## Getting Started
 
-1.  **Clone the Repository**:
-    ```sh
-    git clone <your-repository-url>
-    ```
+1.  **Clone the Repository**: Clone the repo and its submodules (see **Repository Structure** section).
 2.  **Open in IDE**: Open the project folder in a compatible IDE like PlatformIO (recommended) or the Arduino IDE.
 3.  **Install Libraries**: Ensure you have the necessary libraries installed:
     * `ESP32Servo`
