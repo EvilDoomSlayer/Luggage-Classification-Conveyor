@@ -40,7 +40,7 @@ This project is organized into several repositories. This main repository contai
 * **`Conveyor-Hardware-Design`**: Contains all mechanical design files.
     * SolidWorks models
     * STL files for 3D printing
-    * DWG files for manufacturing
+    * DXF files for manufacturing
 * **`Conveyor-Electronic-Design`**: Contains the electronic design files for the custom PCB.
     * KiCad project (schematic and PCB layout)
     * Gerber files for PCB fabrication
