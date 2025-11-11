@@ -34,11 +34,12 @@
 #include "HX711_RTOS.h"    // Custom HX711 library modified for FreeRTOS
 #include "DCMotor.h"       // Custom DC motor controller library
 #include <ESP32Servo.h>    // Library for controlling servo motors on ESP32
+#include "ble_definitions.h"  // Shared definitions with the ESP32 CAM
 
 // --- IMPORTANT: CONFIGURE YOUR SERVER's UUIDs HERE ---
 // These UUIDs must match the UUIDs on the BLE server (e.g., the ESP32-CAM).
-const char* SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const char* CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const char* SERVICE_UUID = SERVICE_UUID_CONVEYOR;
+const char* CHARACTERISTIC_UUID = CHAR_UUID_DETECTION;
 // ---------------------------------------------------
 
 // --- Pin Definitions ---
@@ -71,13 +72,13 @@ const float THRESHOLD_OBJECT_IN_SCALE_GRAMS = 5.0; // Min weight to consider an 
 const float THRESHOLD_ACCEPTED_WEIGHT_GRAMS = 30.0; // Max allowed weight for "heavy" luggage
 // Servo 1 (Classification Diverter) Angles
 const uint8_t SERVO1_HEAVY_LUGGAGE_ANGLE = 0;   // Angle to route heavy luggage
-const uint8_t SERVO1_LIGHT_LUGGAGE_ANGLE = 50;  // Angle to route light luggage
+const uint8_t SERVO1_LIGHT_LUGGAGE_ANGLE = 70;  // Angle to route light luggage
 // Servo 2 (Sorting Gate) Angles
 const uint8_t SERVO2_IDLE_ANGLE = 85;       // Default position, allowing luggage to pass to scale
 const uint8_t SERVO2_ACCEPTED_ANGLE = 135;  // Angle to release accepted luggage
 const uint8_t SERVO2_DISCARTED_ANGLE = 45;  // Angle to release discarded luggage
 // Magnetic Sensor Threshold
-const int THRESHOLD_MAGNETIC_FIELD_DETECTED = 45; // Change from baseline to trigger detection
+const int THRESHOLD_MAGNETIC_FIELD_DETECTED = 96; // Change from baseline to trigger detection
 
 // --- FreeRTOS Handles & State Variables ---
 // Queue for passing events from sensor tasks to the state machine task
@@ -116,17 +117,17 @@ void bleMessageHandlerTask(void* pvParameters) {
     // A flag to track if we are currently waiting for the timeout to expire.
     bool isWaitingForNoLuggageTimeout = false;
 
-    Serial.println("Consumer Task started");
-
     while (1) {
         // Only process messages if the system is in the RUNNING state.
         if (currentState == RUNNING) {
             // Check the queue for new messages with a short, non-blocking delay.
             // This allows the loop to continue and check the timeout logic below.
             if (xQueueReceive(bleValueQueue, &receivedString, pdMS_TO_TICKS(100)) == pdPASS) {
-                DEBUG_PRINT("Conveyor received: '");
-                DEBUG_PRINT(receivedString.c_str());
-                DEBUG_PRINTLN("'");
+                #ifdef BLE_DEBUG_LOGS
+                  DEBUG_PRINT("Conveyor received: '");
+                  DEBUG_PRINT(receivedString.c_str());
+                  DEBUG_PRINTLN("'");
+                #endif
 
                 // If a "light" or "heavy" message is received, handle it immediately.
                 if (receivedString == "light" || receivedString == "heavy") {
@@ -141,8 +142,14 @@ void bleMessageHandlerTask(void* pvParameters) {
                     if (!isWaitingForNoLuggageTimeout) {
                         isWaitingForNoLuggageTimeout = true;
                         noLuggageTimestamp = xTaskGetTickCount(); // Record the current time.
-                        DEBUG_PRINTLN("Started 'no luggage' timeout.");
+                        #ifdef BLE_DEBUG_LOGS
+                          DEBUG_PRINTLN("Started 'no luggage' timeout.");
+                        #endif
                     }
+                } else if (receivedString == "multi_error") {
+                     isWaitingForNoLuggageTimeout = false;
+                     event = EVT_MULTI_ERROR; 
+                     xQueueSend(stateMachineQueue, &event, portMAX_DELAY);
                 }
             }
 
@@ -150,8 +157,9 @@ void bleMessageHandlerTask(void* pvParameters) {
             if (isWaitingForNoLuggageTimeout) {
                 // If the elapsed time is greater than the defined timeout...
                 if ((xTaskGetTickCount() - noLuggageTimestamp) >= pdMS_TO_TICKS(NO_LUGGAGE_TIMEOUT_MS)) {
-                    DEBUG_PRINTLN("'No luggage' timeout expired. Sending event.");
-                    
+                    #ifdef BLE_DEBUG_LOGS
+                      DEBUG_PRINTLN("'No luggage' timeout expired. Sending event.");
+                    #endif
                     event = EVT_NO_LUGGAGE_DETECTED;
                     xQueueSend(stateMachineQueue, &event, portMAX_DELAY);
                     
@@ -201,17 +209,22 @@ void stateMachineTask(void *pvParameters) {
         // Wait indefinitely for an event to arrive in the queue
         if (xQueueReceive(stateMachineQueue, &receivedEvent, waitTicks)) {
             // --- An event WAS received from the queue ---
-            DEBUG_PRINT("Received event ");
-            DEBUG_PRINT(receivedEvent);
-            DEBUG_PRINT(" in state ");
-            DEBUG_PRINTLN(currentState);
-            
+            #ifdef STATE_MACHINE_DEBUG_LOGS
+              DEBUG_PRINT("Received event ");
+              DEBUG_PRINT(receivedEvent);
+              DEBUG_PRINT(" in state ");
+              DEBUG_PRINTLN(currentState);
+            #endif
+
             switch (currentState) {
                 case PAIRING:
                     // Waiting to establish the initial BLE connection
                     if (receivedEvent == EVT_CONNECTED_TO_SERVER) {
-                        DEBUG_PRINTLN("CONNECTED TO ESP32CAM");
+                        #ifdef BLE_DEBUG_LOGS
+                          DEBUG_PRINTLN("CONNECTED TO ESP32CAM");
+                        #endif
                         setLedMode(SOLID_ON); // Solid LED indicates connection
+                        BLEClientWriteCommand(STATE_CMD_IDLE);
                         lastState = currentState;
                         currentState = CONNECTED_IDLE;
                     }
@@ -220,7 +233,9 @@ void stateMachineTask(void *pvParameters) {
                 case DISCONNECTED:
                     // In a disconnected state, waiting to reconnect
                     if (receivedEvent == EVT_CONNECTED_TO_SERVER) {
-                        DEBUG_PRINTLN("CONNECTED TO ESP32CAM");
+                        #ifdef BLE_DEBUG_LOGS
+                          DEBUG_PRINTLN("CONNECTED TO ESP32CAM");
+                        #endif
                         setLedMode(SOLID_ON);
                         currentState = lastState; // Return to the state before disconnection
                         lastState = DISCONNECTED;
@@ -230,15 +245,25 @@ void stateMachineTask(void *pvParameters) {
                 case CONNECTED_IDLE:
                     // System is connected and waiting for an object
                     if (receivedEvent == EVT_CONVEYOR_OBJECT_ENTERED) {
-                        DEBUG_PRINTLN("OBJECT DETECTED");
-                        motor.forward(); // Start the conveyor belt
+                        #ifdef E18_D80NK_DEBUG_LOGS
+                          DEBUG_PRINTLN("OBJECT DETECTED");
+                        #endif
+                        BLEClientWriteCommand(STATE_CMD_RUN);
                         servo2Move(SERVO2_IDLE_ANGLE); // Ensure scale is in idle position
+                        motor.forward(); // Start the conveyor belt
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                        motor.brake();
                         lastState = currentState;
                         currentState = RUNNING;
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("CHANGING TO THE RUNNING STATE");
+                        #endif
                     }
                     // Handle disconnection
                     if (receivedEvent == EVT_DISCONECTED_FROM_SERVER) {
-                        DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #ifdef BLE_DEBUG_LOGS
+                          DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #endif
                         setLedMode(BLINK_RAPID); // Rapid blink indicates error/disconnection
                         motor.brake();
                         lastState = currentState;
@@ -249,34 +274,65 @@ void stateMachineTask(void *pvParameters) {
                 case RUNNING:
                     // Object is on the conveyor, waiting for classification from the camera
                     if (receivedEvent == EVT_LIGHT_LUGGAGE_CLASIFICATED) {
-                        DEBUG_PRINTLN("Light luggage detected");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("Light luggage detected");
+                        #endif
+                        motor.forward();
                         servo1Move(SERVO1_LIGHT_LUGGAGE_ANGLE); // Set diverter for light path
                         lastState = currentState;
                         currentState = LIGHT_LUGGAGE;
                         // --- Start the 5-second magnetic sensor timer ---
-                        DEBUG_PRINTLN("LIGHT_LUGGAGE: Starting 5s magnetic check timer.");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("LIGHT_LUGGAGE: Starting 5s magnetic check timer.");
+                        #endif
                         lightLuggageTimerStart = xTaskGetTickCount();
                         isLightLuggageTimerRunning = true;
                     }
 
                     if (receivedEvent == EVT_HEAVY_LUGGAGE_CLASIFICATED) {
-                        DEBUG_PRINTLN("Heavy luggage detected");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("Heavy luggage detected");
+                        #endif
+                        motor.forward();
                         servo1Move(SERVO1_HEAVY_LUGGAGE_ANGLE); // Set diverter for heavy path
                         lastState = currentState;
                         currentState = HEAVY_LUGGAGE;
                     }
+                    // Handle case where object passes cam with no detection
+                    if (receivedEvent == EVT_NO_LUGGAGE_DETECTED) {
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("Object passed camera, no classification. Stopping.");
+                          DEBUG_PRINTLN("RETURNNING IDLE STATE");
+                        #endif
+                        BLEClientWriteCommand(STATE_CMD_IDLE); // <-- TELL CAM TO STOP
+                        lastState = currentState;
+                        currentState = CONNECTED_IDLE; // Go back to waiting
+                    }
+                    // Handle two objects detected at the same time
+                    if (receivedEvent == EVT_MULTI_ERROR) {
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("TWO OBJECTS DETECTED AT THE SAME TIME - EMERGENCY STOP");
+                          DEBUG_PRINTLN("RETURNNING IDLE STATE");
+                        #endif
+                        BLEClientWriteCommand(STATE_CMD_IDLE); // <-- TELL CAM TO STOP
+                        lastState = currentState;
+                        currentState = CONNECTED_IDLE; // Go back to waiting
+                    }
                     // Handle disconnection
                     if (receivedEvent == EVT_DISCONECTED_FROM_SERVER) {
-                        DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
-                        motor.brake();
+                        #ifdef BLE_DEBUG_LOGS
+                          DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #endif
                         setLedMode(BLINK_RAPID);
                         lastState = currentState;
                         currentState = DISCONNECTED;
                     }
                     // Handle another object entering while one is already processing
                     if (receivedEvent == EVT_CONVEYOR_OBJECT_ENTERED) {
-                        DEBUG_PRINTLN("OBJECT DETECTED WHILE RUNNING - EMERGENCY STOP");
-                        motor.brake();
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("OBJECT DETECTED WHILE RUNNING - EMERGENCY STOP");
+                          DEBUG_PRINTLN("CHANGING TO THE OVERLAP_DETECTED STATE");
+                        #endif
                         lastState = currentState;
                         currentState = OVERLAP_DETECTED;
                     }
@@ -285,7 +341,9 @@ void stateMachineTask(void *pvParameters) {
                 case LIGHT_LUGGAGE:
                     // Object classified as "light" is moving towards the magnetic sensor
                     if (receivedEvent == EVT_MAGNETIC_FIELD_DETECTED) {
-                        DEBUG_PRINTLN("Radioactive Luggage detected");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("Radioactive Luggage detected");
+                        #endif
                         magneticFieldDetectedFlag = 1;
                         servo1Move(SERVO1_HEAVY_LUGGAGE_ANGLE); // Re-route to heavy/discard path
                         lastState = currentState;
@@ -294,7 +352,9 @@ void stateMachineTask(void *pvParameters) {
                     }
                     // Handle disconnection
                     if (receivedEvent == EVT_DISCONECTED_FROM_SERVER) {
-                        DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #ifdef BLE_DEBUG_LOGS
+                          DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #endif
                         motor.brake();
                         setLedMode(BLINK_RAPID);
                         lastState = currentState;
@@ -303,7 +363,10 @@ void stateMachineTask(void *pvParameters) {
                     }
                     // Handle object overlap
                     if (receivedEvent == EVT_CONVEYOR_OBJECT_ENTERED) {
-                        DEBUG_PRINTLN("OBJECT DETECTED WHILE RUNNING - EMERGENCY STOP");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("OBJECT DETECTED WHILE RUNNING - EMERGENCY STOP");
+                          DEBUG_PRINTLN("CHANGING TO THE OVERLAP_DETECTED STATE");
+                        #endif
                         motor.brake();
                         lastState = currentState;
                         currentState = OVERLAP_DETECTED;
@@ -314,28 +377,38 @@ void stateMachineTask(void *pvParameters) {
                 case HEAVY_LUGGAGE:
                     // Object classified as "heavy" or magnetic is moving towards the scale
                     if (receivedEvent == EVT_MAGNETIC_FIELD_DETECTED) {
-                        DEBUG_PRINTLN("Radioactive Luggage detected");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("Radioactive Luggage detected");
+                        #endif
                         magneticFieldDetectedFlag = 1;
                     }
                     // Event from scale task indicates object has arrived
                     if (receivedEvent == EVT_OBJECT_IN_SCALE) {
-                        DEBUG_PRINTLN("Somethig in the scale");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("Somethig arrived to the scale");
+                        #endif
                         motor.brake();  // Stop conveyor for weighing
                         lastState = currentState;
 
                         // If magnetic, discard immediately without weighing
                         if (magneticFieldDetectedFlag) {
-                            DEBUG_PRINTLN("Discarding magnetic luggage");
+                            #ifdef STATE_MACHINE_DEBUG_LOGS
+                              DEBUG_PRINTLN("Magnetic field was detected");
+                              DEBUG_PRINTLN("Magnetic luggage discarted");
+                            #endif
                             servo2Move(SERVO2_DISCARTED_ANGLE);
                             magneticFieldDetectedFlag = 0; // Reset flag
                             currentState = CONNECTED_IDLE; // Return to idle
+                            BLEClientWriteCommand(STATE_CMD_IDLE);
                         } else {
                             currentState = WEIGHING;
                         }
                     }
                     // Handle disconnection
                     if (receivedEvent == EVT_DISCONECTED_FROM_SERVER) {
-                        DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #ifdef BLE_DEBUG_LOGS
+                          DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #endif
                         motor.brake();
                         setLedMode(BLINK_RAPID);
                         lastState = currentState;
@@ -343,7 +416,10 @@ void stateMachineTask(void *pvParameters) {
                     }
                     // Handle object overlap
                     if (receivedEvent == EVT_CONVEYOR_OBJECT_ENTERED) {
-                        DEBUG_PRINTLN("OBJECT DETECTED WHILE RUNNING - EMERGENCY STOP");
+                       #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("OBJECT DETECTED WHILE RUNNING - EMERGENCY STOP");
+                          DEBUG_PRINTLN("CHANGING TO THE OVERLAP_DETECTED STATE");
+                        #endif
                         motor.brake();
                         lastState = currentState;
                         currentState = OVERLAP_DETECTED;
@@ -353,21 +429,29 @@ void stateMachineTask(void *pvParameters) {
                 case WEIGHING:
                     // Object is on the scale being weighed
                     if (receivedEvent == EVT_ACCEPTED) {
-                        DEBUG_PRINTLN("Accepted");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("Accepted");
+                        #endif
                         servo2Move(SERVO2_ACCEPTED_ANGLE);
+                        BLEClientWriteCommand(STATE_CMD_IDLE);
                         lastState = currentState;
                         currentState = CONNECTED_IDLE; // Cycle complete, return to idle
                     }
 
                     if (receivedEvent == EVT_DISCARTED) {
-                        DEBUG_PRINTLN("Discarted");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("Discarted");
+                        #endif
                         servo2Move(SERVO2_DISCARTED_ANGLE);
+                        BLEClientWriteCommand(STATE_CMD_IDLE);
                         lastState = currentState;
                         currentState = CONNECTED_IDLE; // Cycle complete, return to idle
                     }
                     // Handle disconnection
                     if (receivedEvent == EVT_DISCONECTED_FROM_SERVER) {
-                        DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #ifdef BLE_DEBUG_LOGS
+                          DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #endif
                         motor.brake();
                         setLedMode(BLINK_RAPID);
                         lastState = currentState;
@@ -378,7 +462,9 @@ void stateMachineTask(void *pvParameters) {
                 case OVERLAP_DETECTED:
                     // Emergency stop state, waiting for extra object to be removed
                     if (receivedEvent == EVT_DISCONECTED_FROM_SERVER) {
-                        DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #ifdef BLE_DEBUG_LOGS
+                          DEBUG_PRINTLN("DISCONNECTED FROM ESP32CAM");
+                        #endif
                         motor.brake();
                         setLedMode(BLINK_RAPID);
                         lastState = currentState;
@@ -386,7 +472,11 @@ void stateMachineTask(void *pvParameters) {
                     }
                     // Event indicates the overlapping object has been removed
                     if (receivedEvent == EVT_CONVEYOR_OBJECT_EXITED) {
-                        DEBUG_PRINTLN("OBJECT REMOVED. CONTINUING CURRENT PROCESS");
+                        #ifdef STATE_MACHINE_DEBUG_LOGS
+                          DEBUG_PRINTLN("OBJECT REMOVED. CONTINUING CURRENT PROCESS");
+                          DEBUG_PRINT("RETURNNING TO THE STATE: ");
+                          DEBUG_PRINTLN(lastState);
+                        #endif
                         if (lastState > CONNECTED_IDLE && lastState < WEIGHING) {
                             motor.forward();
                         }
@@ -404,10 +494,14 @@ void stateMachineTask(void *pvParameters) {
                 // Check if the 5-second timer has expired
                 DEBUG_PRINTLN(xTaskGetTickCount() - lightLuggageTimerStart);
                 if ((xTaskGetTickCount() - lightLuggageTimerStart) >= pdMS_TO_TICKS(LIGHT_LUGGAGE_MAGNETIC_TIMEOUT_MS)) {
-                    DEBUG_PRINTLN("LIGHT_LUGGAGE: 5s timeout. No magnetic field detected.");
-                    DEBUG_PRINTLN("Stopping conveyor and returning to idle.");
+                    #ifdef STATE_MACHINE_DEBUG_LOGS
+                      DEBUG_PRINTLN("LIGHT_LUGGAGE: 5s timeout. No magnetic field detected.");
+                      DEBUG_PRINTLN("CYCLE COMPLETE");
+                      DEBUG_PRINTLN("RETURNNING TO IDLE STATE");
+                    #endif
                     motor.brake(); 
                     // Return to the idle state
+                    BLEClientWriteCommand(STATE_CMD_IDLE);
                     lastState = currentState;
                     currentState = CONNECTED_IDLE; 
                     // Stop the timer
@@ -446,6 +540,11 @@ void E18_D80NKTask(void *pvParameters) {
     while(1) {
         if (currentState == CONNECTED_IDLE) {
             // Check if the sensor detects an object (LOW signal means object is present).
+            #ifdef E18_D80NK_DEBUG_LOGS
+              bool E18_D80NK_READ = digitalRead(E18_D80NKPin);
+              DEBUG_PRINT("E18_D80NK read: ");
+              DEBUG_PRINTLN(E18_D80NK_READ);
+            #endif
             if (!digitalRead(E18_D80NKPin)) {
                 // An object is detected. If we aren't already timing it, start the timer now.
                 if (!isObjectDetectionPending) {
@@ -505,21 +604,29 @@ void E18_D80NKTask(void *pvParameters) {
  * `EVT_DISCARTED` based on whether the weight is within the allowed limit.
  */
 void HX771Task(void *pvParameters) {
-    DEBUG_PRINT("HX711 task running on core ");
-    DEBUG_PRINTLN(xPortGetCoreID());
+    #ifdef HX711_DEBUG_LOGS
+      DEBUG_PRINT("HX711 task running on core ");
+      DEBUG_PRINTLN(xPortGetCoreID());
+    #endif
 
     // Initialize the scale
     scale.begin(HX711_DOUT_PIN, HX711_SCK_PIN);
     scale.set_scale(CALIBRATION_FACTOR); // Set the calibration factor
     scale.tare();                        // Reset the scale to 0
 
-    DEBUG_PRINTLN("Scale initialized and tared. Ready to measure.");
+    #ifdef HX711_DEBUG_LOGS
+      DEBUG_PRINTLN("Scale initialized and tared. Ready to measure.");
+    #endif
     event_t event;
 
     while(1) {
         if (scale.is_ready()) {
             // Get an average of 5 readings for stability
             float reading = scale.get_units(5);
+            #ifdef HX711_DEBUG_LOGS
+              DEBUG_PRINT("HX711 meassurements: ");
+              DEBUG_PRINT(reading);
+            #endif
 
             if (currentState == HEAVY_LUGGAGE) {
                 // Wait for an object to be physically present on the scale
@@ -530,14 +637,18 @@ void HX771Task(void *pvParameters) {
                 }
             } else if (currentState == WEIGHING) {
                 // Perform the final weight check
-                DEBUG_PRINT("Weight: ");
-                DEBUG_PRINT(reading, 2); // Print with 2 decimal places
-                DEBUG_PRINTLN(" g");
+                #ifdef HX711_DEBUG_LOGS
+                  DEBUG_PRINT("Final Weight: ");
+                  DEBUG_PRINT(reading, 2); // Print with 2 decimal places
+                  DEBUG_PRINTLN(" g");
+                #endif
                 event = (reading <= THRESHOLD_ACCEPTED_WEIGHT_GRAMS) ? EVT_ACCEPTED : EVT_DISCARTED;
                 xQueueSend(stateMachineQueue, &event, portMAX_DELAY);
             }
         } else {
-            DEBUG_PRINTLN("HX711 not found.");
+            #ifdef HX711_DEBUG_LOGS
+              DEBUG_PRINTLN("HX711 not found.");
+            #endif
         }
         // Delay to prevent constant readings and yield CPU time
         vTaskDelay(pdMS_TO_TICKS(1000)); 
@@ -562,16 +673,21 @@ void KY_024Task(void *pvParameters) {
     
     // --- Calibration Step ---
     int baselineValue = 0;
-    DEBUG_PRINTLN("Calibrating magnetic sensor... Keep magnet away for 2 seconds.");
+    #ifdef KY_024_DEBUG_LOGS
+      DEBUG_PRINTLN("Calibrating magnetic sensor... Keep magnet away for 2 seconds.");
+    #endif
     long total = 0;
+    vTaskDelay(pdMS_TO_TICKS(2000)); 
     // Take an average of 100 readings to get a stable baseline with no magnetic field.
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 200; i++) {
         total += analogRead(KY_024_PIN);
         vTaskDelay(pdMS_TO_TICKS(20)); // Small delay between readings
     }
-    baselineValue = total / 100;
-    DEBUG_PRINT("Calibration complete. Baseline value: ");
-    DEBUG_PRINTLN(baselineValue);
+    baselineValue = total / 200;
+    #ifdef KY_024_DEBUG_LOGS
+      DEBUG_PRINT("Calibration complete. Baseline value: ");
+      DEBUG_PRINTLN(baselineValue);
+    #endif
     
     while(1) {
         // Only monitor the sensor when luggage is actively being processed.
@@ -579,9 +695,10 @@ void KY_024Task(void *pvParameters) {
             int currentValue = analogRead(KY_024_PIN);
             // Calculate the absolute difference from the no-field baseline
             int difference = abs(currentValue - baselineValue);
-            DEBUG_PRINT("Reading of KY_024: ");
-            DEBUG_PRINTLN(difference);
-
+            #ifdef KY_024_DEBUG_LOGS
+              DEBUG_PRINT("Reading of KY_024: ");
+              DEBUG_PRINTLN(difference);
+            #endif
             // If the change in magnetic field is significant, send an event.
             if (difference > THRESHOLD_MAGNETIC_FIELD_DETECTED) {
                 event = EVT_MAGNETIC_FIELD_DETECTED;
@@ -600,11 +717,17 @@ void KY_024Task(void *pvParameters) {
  * to complete, and then detaches it to prevent jitter and reduce power consumption.
  */
 void servo1Move(uint8_t angle) {
-    DEBUG_PRINT("Moving servo 1 to: ");
+    #ifdef SERVO_DEBUG_LOGS
+      DEBUG_PRINT("Moving servo 1 to: ");
+    #endif
     if (angle == SERVO1_HEAVY_LUGGAGE_ANGLE) {
-        DEBUG_PRINTLN("Heavy Luggage Position");
+        #ifdef SERVO_DEBUG_LOGS
+          DEBUG_PRINTLN("Heavy Luggage Position");
+        #endif
     } else {
-        DEBUG_PRINTLN("Light Luggage Position");
+        #ifdef SERVO_DEBUG_LOGS
+          DEBUG_PRINTLN("Light Luggage Position");
+        #endif
     }
     servo1.attach(SERVO1_PIN);
     servo1.write(angle);
@@ -619,13 +742,21 @@ void servo1Move(uint8_t angle) {
  * to complete, and then detaches it to prevent jitter and reduce power consumption.
  */
 void servo2Move(uint8_t angle) {
-    DEBUG_PRINT("Moving servo 2 to: ");
+    #ifdef SERVO_DEBUG_LOGS
+      DEBUG_PRINT("Moving servo 2 to: ");
+    #endif
     if (angle == SERVO2_IDLE_ANGLE) {
-        DEBUG_PRINTLN("Idle Position");
+        #ifdef SERVO_DEBUG_LOGS
+          DEBUG_PRINTLN("Idle Position");
+        #endif
     } else if (angle == SERVO2_ACCEPTED_ANGLE) {
-        DEBUG_PRINTLN("Accepted Position");
+        #ifdef SERVO_DEBUG_LOGS
+          DEBUG_PRINTLN("Accepted Position");
+        #endif
     } else {
-        DEBUG_PRINTLN("Discarded Position");
+        #ifdef SERVO_DEBUG_LOGS
+          DEBUG_PRINTLN("Discarded Position");
+        #endif
     }
     servo2.attach(SERVO2_PIN);
     servo2.write(angle);

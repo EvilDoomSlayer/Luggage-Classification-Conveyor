@@ -41,10 +41,11 @@ typedef enum {
     EVT_LIGHT_LUGGAGE_CLASIFICATED, // BLE message "light" received.
     EVT_HEAVY_LUGGAGE_CLASIFICATED, // BLE message "heavy" received.
     EVT_NO_LUGGAGE_DETECTED,        // BLE message "none" received and timed out.
+    EVT_MULTI_ERROR,                // BLE message "multi_error" received.
     EVT_MAGNETIC_FIELD_DETECTED,    // Magnetic sensor has been triggered.
     EVT_OBJECT_IN_SCALE,            // Load cell detects a significant weight.
     EVT_DISCARTED,                  // Luggage is overweight or magnetic.
-    EVT_ACCEPTED,                   // Luggage passed all checks.
+    EVT_ACCEPTED                    // Luggage passed all checks.
 } event_t;
 
 #endif // APP_EVENTS_H

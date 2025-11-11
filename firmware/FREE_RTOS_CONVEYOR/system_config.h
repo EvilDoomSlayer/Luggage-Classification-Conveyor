@@ -23,6 +23,30 @@
   #define DEBUG_MODE
 #endif
 
+#if 1
+  #define STATE_MACHINE_DEBUG_LOGS
+#endif
+
+#if 1
+  #define BLE_DEBUG_LOGS
+#endif
+
+#if 1
+  #define E18_D80NK_DEBUG_LOGS
+#endif
+
+#if 1
+  #define HX711_DEBUG_LOGS
+#endif
+
+#if 1
+  #define KY_024_DEBUG_LOGS
+#endif
+
+#if 1
+  #define SERVO_DEBUG_LOGS
+#endif
+
 #ifdef DEBUG_MODE
   // If DEBUG_MODE is defined, the macros are aliases for Serial.print functions.
   #define DEBUG_PRINT(...)    Serial.print(__VA_ARGS__)

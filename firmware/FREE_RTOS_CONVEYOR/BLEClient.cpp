@@ -15,6 +15,7 @@
 #include "system_config.h"
 #include "BLEClient.h"
 #include "Events.h"  // Defines state machine event types like EVT_CONNECTED_TO_SERVER
+#include "ble_definitions.h" // Shared definitions with the ESP32 CAM
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEScan.h>
@@ -28,10 +29,12 @@ QueueHandle_t bleValueQueue; // Queue to send received data strings to other tas
 static QueueHandle_t stateMachineQueueHandle; // Handle to the main app's state machine queue
 static BLEUUID serviceUUID;                   // UUID of the service to look for
 static BLEUUID charUUID;                      // UUID of the characteristic to subscribe to
+static BLEUUID stateCommandCharUUID;          // UUID of the characteristic to subscribe to 
 static boolean doConnect = false;             // Flag set to true when a valid device is found
 static boolean connected = false;             // Flag to track the current connection status
 static BLEAdvertisedDevice* myDevice;         // Pointer to the found BLE device
 static BLERemoteCharacteristic* pRemoteCharacteristic; // Pointer to the remote characteristic
+static BLERemoteCharacteristic* pStateCommandCharacteristic; // Pointer to the command characteristic
 
 // --- Forward Declarations for Internal Functions and Classes ---
 static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify);
@@ -47,7 +50,10 @@ class MyClientCallback : public BLEClientCallbacks {
      * @param pclient Pointer to the BLE client.
      */
     void onConnect(BLEClient* pclient) {
-      DEBUG_PRINTLN("onConnect: Client connected to server!");
+      #ifdef BLE_DEBUG_LOGS
+        DEBUG_PRINTLN("onConnect: Client connected to server!");
+      #endif
+      connected = true; // Set connection flag
       // Send a connection event to the main state machine
       event_t event = EVT_CONNECTED_TO_SERVER;
       if (stateMachineQueueHandle != NULL) {
@@ -60,7 +66,12 @@ class MyClientCallback : public BLEClientCallbacks {
      * @param pclient Pointer to the BLE client.
      */
     void onDisconnect(BLEClient* pclient) {
-      DEBUG_PRINTLN("onDisconnect: Client disconnected");
+      #ifdef BLE_DEBUG_LOGS
+        DEBUG_PRINTLN("onDisconnect: Client disconnected");
+      #endif
+      connected = false; // Clear connection flag
+      pRemoteCharacteristic = nullptr;
+      pStateCommandCharacteristic = nullptr;
       // Send a disconnection event to the main state machine
       event_t event = EVT_DISCONECTED_FROM_SERVER;
       if (stateMachineQueueHandle != NULL) {
@@ -84,7 +95,9 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
             BLEDevice::getScan()->stop(); // Stop scanning once we find the device
             myDevice = new BLEAdvertisedDevice(advertisedDevice);
             doConnect = true; // Set the flag to trigger a connection attempt
-            DEBUG_PRINTLN("Found our device! Now connecting...");
+            #ifdef BLE_DEBUG_LOGS
+              DEBUG_PRINTLN("Found our device! Now connecting...");
+            #endif
         }
     }
 };
@@ -117,19 +130,56 @@ static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic, ui
 bool connectToServer() {
     BLEClient* pClient = BLEDevice::createClient();
     pClient->setClientCallbacks(new MyClientCallback());
-    pClient->connect(myDevice);
+    
+    #ifdef BLE_DEBUG_LOGS
+      DEBUG_PRINT("Connecting to ");
+      DEBUG_PRINTLN(myDevice->getAddress().toString().c_str());
+    #endif
+    
+    if (!pClient->connect(myDevice)) {
+        #ifdef BLE_DEBUG_LOGS
+          DEBUG_PRINTLN("Failed to connect.");
+        #endif
+        return false;
+    }
     setLedMode(BLINK_SLOW); // Indicate connection attempt
 
     // Get the service we are interested in
     BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
     if (pRemoteService == nullptr) {
+        #ifdef BLE_DEBUG_LOGS
+          DEBUG_PRINT("Failed to find service UUID: ");
+          DEBUG_PRINTLN(serviceUUID.toString().c_str());
+        #endif
         pClient->disconnect();
         return false;
     }
 
-    // Get the service we are interested in
+    // Get the status characteristic
     pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
     if (pRemoteCharacteristic == nullptr) {
+        #ifdef BLE_DEBUG_LOGS
+          DEBUG_PRINT("Failed to find characteristic UUID: ");
+          DEBUG_PRINTLN(charUUID.toString().c_str());
+        #endif
+        pClient->disconnect();
+        return false;
+    }
+
+    // Get the write command characteristic
+    pStateCommandCharacteristic = pRemoteService->getCharacteristic(stateCommandCharUUID);
+    if (pStateCommandCharacteristic == nullptr) {
+        #ifdef BLE_DEBUG_LOGS
+          DEBUG_PRINT("Failed to find characteristic UUID: ");
+          DEBUG_PRINTLN(stateCommandCharUUID.toString().c_str());
+        #endif
+        pClient->disconnect();
+        return false;
+    }
+    if (!pStateCommandCharacteristic->canWrite()) {
+        #ifdef BLE_DEBUG_LOGS
+          DEBUG_PRINTLN("Command characteristic is not writable!");
+        #endif
         pClient->disconnect();
         return false;
     }
@@ -138,8 +188,9 @@ bool connectToServer() {
     if (pRemoteCharacteristic->canNotify()) {
         pRemoteCharacteristic->registerForNotify(notifyCallback);
     }
-
-    DEBUG_PRINTLN("Successfully connected and registered for notifications.");
+    #ifdef BLE_DEBUG_LOGS
+      DEBUG_PRINTLN("Successfully connected and registered for notifications.");
+    #endif
     return true;
 }
 
@@ -150,7 +201,9 @@ bool connectToServer() {
  * It's designed to be pinned to Core 0.
  */
 void BLEClientTask(void* pvParameters) {
-    DEBUG_PRINTLN("BLE Client Task started on Core 0");
+    #ifdef BLE_DEBUG_LOGS
+      DEBUG_PRINTLN("BLE Client Task started on Core 0");
+    #endif
     BLEDevice::init("");
 
     BLEScan* pBLEScan = BLEDevice::getScan();
@@ -163,19 +216,48 @@ void BLEClientTask(void* pvParameters) {
         if (doConnect && !connected) {
             if (connectToServer()) {
                 // Connection successful
+                // The onConnect callback will set 'connected' to true
             } else {
-                DEBUG_PRINTLN("Failed to connect to the server.");
+                #ifdef BLE_DEBUG_LOGS
+                  DEBUG_PRINTLN("Failed to connect to the server.");
+                #endif
             }
             doConnect = false; // Reset the connection trigger flag
         } 
         // If disconnected, start scanning again
         else if (!connected) {
+            #ifdef BLE_DEBUG_LOGS
+              DEBUG_PRINTLN("Not connected, starting scan...");
+            #endif
             BLEDevice::getScan()->start(5, false); // Rescan
         }
 
         // If connected, this loop will just idle until a disconnect occurs.
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+}
+
+/**
+ * @brief Public function to write a command to the server.
+ */
+void BLEClientWriteCommand(state_command_t command) {
+    if (!connected || pStateCommandCharacteristic == nullptr) {
+        #ifdef BLE_DEBUG_LOGS
+          DEBUG_PRINTLN("BLEClientWriteCommand: Not connected or char handle is null.");
+        #endif
+        return;
+    }
+
+    uint8_t data[1];
+    data[0] = (uint8_t)command;
+
+    #ifdef BLE_DEBUG_LOGS
+      DEBUG_PRINT("BLEClientWriteCommand: Sending 0x");
+      DEBUG_PRINTLN(data[0], HEX);
+    #endif
+
+    // Write the value. 'false' means Write Without Response.
+    pStateCommandCharacteristic->writeValue(data, 1, false);
 }
 
 /**
@@ -186,6 +268,7 @@ void setupBLEClient(const char* serviceUUID_str, const char* characteristicUUID_
     stateMachineQueueHandle = smQueue;
     serviceUUID = BLEUUID(serviceUUID_str);
     charUUID = BLEUUID(characteristicUUID_str);
+    stateCommandCharUUID = BLEUUID(CHAR_UUID_STATE_COMMAND);
 
     // 2. Create the queue that will hold incoming string data from BLE notifications
     bleValueQueue = xQueueCreate(5, sizeof(std::string));

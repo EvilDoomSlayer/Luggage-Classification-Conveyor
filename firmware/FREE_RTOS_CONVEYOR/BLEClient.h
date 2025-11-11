@@ -23,6 +23,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "LedController.h" // Assumes LedController is part of the project for status indication
+#include "ble_definitions.h" // Shared definitions with the ESP32 CAM
 
 /**
  * @brief Sets up and starts the BLE client task.
@@ -46,5 +47,12 @@ void setupBLEClient(const char* serviceUUID, const char* characteristicUUID, Que
  * server via notifications. This queue passes `std::string` objects.
  */
 extern QueueHandle_t bleValueQueue;
+
+/**
+ * @brief Writes a state command to the BLE Server.
+ *
+ * @param command The state_command_t to send (STATE_CMD_IDLE or STATE_CMD_RUN).
+ */
+void BLEClientWriteCommand(state_command_t command);
 
 #endif // BLE_CLIENT_H
