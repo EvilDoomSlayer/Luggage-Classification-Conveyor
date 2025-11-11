@@ -7,3 +7,6 @@
 [submodule "Conveyor-Tools"]
 	path = Conveyor-Tools
 	url = https://github.com/EvilDoomSlayer/Conveyor-Tools
+[submodule "Conveyor-CAM"]
+	path = Conveyor-CAM
+	url = https://github.com/EvilDoomSlayer/Conveyor-CAM.git
