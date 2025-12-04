@@ -37,6 +37,7 @@ The workflow is as follows:
 This project is organized into several repositories. This main repository contains the firmware, while the hardware designs and supplementary tools are included as Git submodules.
 
 * **`/` (root)**: Contains the main ESP32 firmware for the conveyor system.
+* **`Conveyor-CAM`**: Contains the ESP32 CAM firmware
 * **`Conveyor-Hardware-Design`**: Contains all mechanical design files.
     * SolidWorks models
     * STL files for 3D printing
@@ -125,18 +126,7 @@ The system can be in one of the following states:
 
 ## Configuration
 
-Before uploading the firmware, you must configure the BLE identifiers to match your BLE server (e.g., the ESP32-CAM).
-
-1.  Open the `FREE_RTOS_CONVEYOR.ino` file.
-2.  Locate the following lines:
-    ```cpp
-    // --- IMPORTANT: CONFIGURE YOUR SERVER's UUIDs HERE ---
-    const char* SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-    const char* CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-    ```
-3.  Replace the placeholder UUIDs with the exact UUIDs used by your BLE server device.
-
-Additionally, you may need to adjust the following constants based on your specific hardware and requirements:
+Before uploading the firmware, you may need to adjust the following constants based on your specific hardware and requirements:
 * `CALIBRATION_FACTOR`: This value for the HX711 load cell must be determined by running a calibration sketch.
 * `THRESHOLD_..._GRAMS`: Adjust the weight thresholds for object detection and acceptance.
 * `SERVO..._ANGLE`: Calibrate the servo angles for your physical setup.
