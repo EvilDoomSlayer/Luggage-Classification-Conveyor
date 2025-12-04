@@ -139,6 +139,6 @@ Before uploading the firmware, you may need to adjust the following constants ba
 3.  **Install Libraries**: Ensure you have the necessary libraries installed:
     * `ESP32Servo`
     * Any custom libraries included in the `lib` folder (e.g., `BLEClient`, `DCMotor`, `HX711_RTOS`).
-4.  **Configure**: Update the BLE UUIDs and other constants as described in the **Configuration** section above.
+4.  **Configure**: Update the constants as described in the **Configuration** section above.
 5.  **Build and Upload**: Connect your ESP32, select the correct COM port, and upload the firmware.
 6.  **Run**: Power the system and open the Serial Monitor at `115200` baud to see debug messages and system status.
