@@ -44,10 +44,9 @@ This project is organized into several repositories. This main repository contai
 * **`Conveyor-Electronic-Design`**: Contains the electronic design files for the custom PCB.
     * KiCad project (schematic and PCB layout)
     * Gerber files for PCB fabrication
-* **`Conveyor-Tools`**: Includes PC-based software tools for:
-    * Sensor calibration
-    * System diagnostics
-    * Initial setup
+* **`Conveyor-Tools`**: Includes C++ scripts tools for:
+    * Load Cell Sensor calibration
+    * BLE Server for debugging
 
 To clone this repository and all its submodules, use the `--recurse-submodules` flag:
 ```sh
