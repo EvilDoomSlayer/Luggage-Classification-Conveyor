@@ -78,7 +78,7 @@ const uint8_t SERVO2_IDLE_ANGLE = 85;       // Default position, allowing luggag
 const uint8_t SERVO2_ACCEPTED_ANGLE = 135;  // Angle to release accepted luggage
 const uint8_t SERVO2_DISCARTED_ANGLE = 45;  // Angle to release discarded luggage
 // Magnetic Sensor Threshold
-const int THRESHOLD_MAGNETIC_FIELD_DETECTED = 96; // Change from baseline to trigger detection
+const int THRESHOLD_MAGNETIC_FIELD_DETECTED = 60; // Change from baseline to trigger detection
 
 // --- FreeRTOS Handles & State Variables ---
 // Queue for passing events from sensor tasks to the state machine task
@@ -117,9 +117,14 @@ void bleMessageHandlerTask(void* pvParameters) {
     // A flag to track if we are currently waiting for the timeout to expire.
     bool isWaitingForNoLuggageTimeout = false;
 
+    int multi_error_tries = 0;
+
     while (1) {
         // Only process messages if the system is in the RUNNING state.
         if (currentState == RUNNING) {
+            #ifdef BLE_DEBUG_LOGS
+              DEBUG_PRINTLN("Reciving BLE Messages");
+            #endif
             // Check the queue for new messages with a short, non-blocking delay.
             // This allows the loop to continue and check the timeout logic below.
             if (xQueueReceive(bleValueQueue, &receivedString, pdMS_TO_TICKS(100)) == pdPASS) {
@@ -147,9 +152,12 @@ void bleMessageHandlerTask(void* pvParameters) {
                         #endif
                     }
                 } else if (receivedString == "multi_error") {
-                     isWaitingForNoLuggageTimeout = false;
-                     event = EVT_MULTI_ERROR; 
-                     xQueueSend(stateMachineQueue, &event, portMAX_DELAY);
+                     multi_error_tries = multi_error_tries + 1;
+                     if (multi_error_tries >= 6) {
+                        isWaitingForNoLuggageTimeout = false;
+                        event = EVT_MULTI_ERROR; 
+                        xQueueSend(stateMachineQueue, &event, portMAX_DELAY);
+                     }
                 }
             }
 
