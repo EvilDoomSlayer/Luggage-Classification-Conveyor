@@ -37,6 +37,7 @@ The workflow is as follows:
 This project is organized into several repositories. This main repository contains the firmware, while the hardware designs and supplementary tools are included as Git submodules.
 
 * **`/` (root)**: Contains the main ESP32 firmware for the conveyor system.
+* **`Conveyor-CAM`**: Contains the ESP32 CAM firmware
 * **`Conveyor-Hardware-Design`**: Contains all mechanical design files.
     * SolidWorks models
     * STL files for 3D printing
@@ -44,10 +45,9 @@ This project is organized into several repositories. This main repository contai
 * **`Conveyor-Electronic-Design`**: Contains the electronic design files for the custom PCB.
     * KiCad project (schematic and PCB layout)
     * Gerber files for PCB fabrication
-* **`Conveyor-Tools`**: Includes PC-based software tools for:
-    * Sensor calibration
-    * System diagnostics
-    * Initial setup
+* **`Conveyor-Tools`**: Includes C++ scripts tools for:
+    * Load Cell Sensor calibration
+    * BLE Server for debugging
 
 To clone this repository and all its submodules, use the `--recurse-submodules` flag:
 ```sh
@@ -126,18 +126,7 @@ The system can be in one of the following states:
 
 ## Configuration
 
-Before uploading the firmware, you must configure the BLE identifiers to match your BLE server (e.g., the ESP32-CAM).
-
-1.  Open the `FREE_RTOS_CONVEYOR.ino` file.
-2.  Locate the following lines:
-    ```cpp
-    // --- IMPORTANT: CONFIGURE YOUR SERVER's UUIDs HERE ---
-    const char* SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-    const char* CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-    ```
-3.  Replace the placeholder UUIDs with the exact UUIDs used by your BLE server device.
-
-Additionally, you may need to adjust the following constants based on your specific hardware and requirements:
+Before uploading the firmware, you may need to adjust the following constants based on your specific hardware and requirements:
 * `CALIBRATION_FACTOR`: This value for the HX711 load cell must be determined by running a calibration sketch.
 * `THRESHOLD_..._GRAMS`: Adjust the weight thresholds for object detection and acceptance.
 * `SERVO..._ANGLE`: Calibrate the servo angles for your physical setup.
@@ -150,6 +139,6 @@ Additionally, you may need to adjust the following constants based on your speci
 3.  **Install Libraries**: Ensure you have the necessary libraries installed:
     * `ESP32Servo`
     * Any custom libraries included in the `lib` folder (e.g., `BLEClient`, `DCMotor`, `HX711_RTOS`).
-4.  **Configure**: Update the BLE UUIDs and other constants as described in the **Configuration** section above.
+4.  **Configure**: Update the constants as described in the **Configuration** section above.
 5.  **Build and Upload**: Connect your ESP32, select the correct COM port, and upload the firmware.
 6.  **Run**: Power the system and open the Serial Monitor at `115200` baud to see debug messages and system status.
