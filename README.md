@@ -2,7 +2,11 @@
 
 This repository contains the firmware for an automated luggage sorting conveyor belt system powered by an ESP32 microcontroller. The project uses the FreeRTOS real-time operating system to manage multiple sensors and actuators concurrently, creating a robust, event-driven sorting solution.
 
-
+<div align="center">
+  <a href="https://youtu.be/3rDAy-tpFlw">
+    <img src="https://github.com/user-attachments/assets/98a42221-4dea-43e3-b0d4-4c03af308bff" alt="Snapshoot" width="800">
+  </a>
+</div>
 
 ## Overview
 
